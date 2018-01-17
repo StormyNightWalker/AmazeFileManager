@@ -23,8 +23,8 @@ import com.amaze.filemanager.R;
 import com.amaze.filemanager.activities.MainActivity;
 import com.amaze.filemanager.database.TabHandler;
 import com.amaze.filemanager.database.models.Tab;
+import com.amaze.filemanager.fragments.preference_fragments.PreferencesConstants;
 import com.amaze.filemanager.ui.ColorCircleDrawable;
-import com.amaze.filemanager.ui.drawer.EntryItem;
 import com.amaze.filemanager.ui.views.DisablableViewPager;
 import com.amaze.filemanager.ui.views.Indicator;
 import com.amaze.filemanager.utils.DataUtils;
@@ -54,6 +54,8 @@ public class TabFragment extends android.support.v4.app.Fragment
     MainActivity mainActivity;
     boolean savepaths;
     FragmentManager fragmentManager;
+
+    private static final String KEY_POSITION = "pos";
 
     // ink indicators for viewpager only for Lollipop+
     private Indicator indicator;
@@ -87,7 +89,7 @@ public class TabFragment extends android.support.v4.app.Fragment
 
         sharedPrefs = PreferenceManager.getDefaultSharedPreferences(getActivity());
         savepaths = sharedPrefs.getBoolean("savepaths", true);
-        coloredNavigation = sharedPrefs.getBoolean("colorednavigation", true);
+        coloredNavigation = sharedPrefs.getBoolean(PreferencesConstants.PREFERENCE_COLORED_NAVIGATION, true);
 
         mViewPager = (DisablableViewPager) rootView.findViewById(R.id.pager);
 
@@ -107,14 +109,14 @@ public class TabFragment extends android.support.v4.app.Fragment
             if (i == 0) {
                 // creating tabs in db for the first time, probably the first launch of app
                 if (mainActivity.storage_count > 1)
-                    addTab(new Tab(1, "", ((EntryItem) dataUtils.getList().get(1)).getPath(), "/"), 1, "");
+                    addTab(new Tab(1, "", dataUtils.getList().get(1).path, "/"), 1, "");
                 else
                     addTab(new Tab(1, "", "/", "/"), 1, "");
                 if (!dataUtils.getList().get(0).isSection()) {
-                    String pa = ((EntryItem) dataUtils.getList().get(0)).getPath();
+                    String pa = dataUtils.getList().get(0).path;
                     addTab(new Tab(2, "", pa, pa), 2, "");
                 } else
-                    addTab(new Tab(2, "", ((EntryItem) dataUtils.getList().get(1)).getPath(), "/"), 2, "");
+                    addTab(new Tab(2, "", dataUtils.getList().get(1).path, "/"), 2, "");
             } else {
                 if (path != null && path.length() != 0) {
                     if (l == 1)
@@ -153,7 +155,7 @@ public class TabFragment extends android.support.v4.app.Fragment
                     getActivity().getSupportFragmentManager());
 
             mViewPager.setAdapter(mSectionsPagerAdapter);
-            int pos1 = savedInstanceState.getInt("pos", 0);
+            int pos1 = savedInstanceState.getInt(KEY_POSITION, 0);
             MainActivity.currentTab = pos1;
             mViewPager.setCurrentItem(pos1);
             mSectionsPagerAdapter.notifyDataSetChanged();
@@ -250,7 +252,7 @@ public class TabFragment extends android.support.v4.app.Fragment
                 fragmentManager.putFragment(outState, "tab" + i, fragment);
                 i++;
             }
-            outState.putInt("pos", mViewPager.getCurrentItem());
+            outState.putInt(KEY_POSITION, mViewPager.getCurrentItem());
         }
     }
 

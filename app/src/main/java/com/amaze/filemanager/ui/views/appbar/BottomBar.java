@@ -25,10 +25,10 @@ import android.widget.TextView;
 
 import com.amaze.filemanager.R;
 import com.amaze.filemanager.activities.MainActivity;
+import com.amaze.filemanager.fragments.CompressedExplorerFragment;
 import com.amaze.filemanager.fragments.MainFragment;
 import com.amaze.filemanager.fragments.TabFragment;
-import com.amaze.filemanager.fragments.CompressedExplorerFragment;
-import com.amaze.filemanager.fragments.preference_fragments.PrefFrag;
+import com.amaze.filemanager.fragments.preference_fragments.PreferencesConstants;
 import com.amaze.filemanager.ui.dialogs.GeneralDialogCreation;
 import com.amaze.filemanager.utils.BottomBarButtonPath;
 import com.amaze.filemanager.utils.MainActivityHelper;
@@ -103,11 +103,11 @@ public class BottomBar implements View.OnTouchListener{
         buttonRoot.setLayoutParams(buttonParams);
 
         buttonStorage = new ImageButton(a);
-        buttonStorage.setImageDrawable(a.getResources().getDrawable(R.drawable.ic_sd_storage_white_56dp));
+        buttonStorage.setImageDrawable(a.getResources().getDrawable(R.drawable.ic_sd_storage_white_24dp));
         buttonStorage.setBackgroundColor(Color.TRANSPARENT);
         buttonStorage.setLayoutParams(buttonParams);
 
-        arrow = mainActivity.get().getResources().getDrawable(R.drawable.abc_ic_ab_back_holo_dark);
+        arrow = mainActivity.get().getResources().getDrawable(R.drawable.ic_keyboard_arrow_right_white_24dp);
 
         timer = new CountDownTimer(5000, 1000) {
             @Override
@@ -119,7 +119,7 @@ public class BottomBar implements View.OnTouchListener{
             }
         };
 
-        allowChangePaths = mainActivity.get().getPrefs().getBoolean(PrefFrag.PREFERENCE_CHANGEPATHS, false);
+        allowChangePaths = mainActivity.get().getPrefs().getBoolean(PreferencesConstants.PREFERENCE_CHANGEPATHS, false);
 
         gestureDetector = new GestureDetector(a.getApplicationContext(), new GestureDetector.SimpleOnGestureListener() {
             @Override
@@ -303,6 +303,9 @@ public class BottomBar implements View.OnTouchListener{
         MainActivityHelper mainActivityHelper = mainActivity.get().mainActivityHelper;
 
         switch (openmode) {
+            case SFTP:
+                newPath = mainActivityHelper.parseSftpPath(news);
+                break;
             case SMB:
                 newPath = mainActivityHelper.parseSmbPath(news);
                 break;

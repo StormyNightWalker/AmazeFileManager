@@ -7,11 +7,19 @@ import android.preference.PreferenceManager;
 import android.support.v4.provider.DocumentFile;
 import android.util.Log;
 
+import com.amaze.filemanager.adapters.data.LayoutElementParcelable;
 import com.amaze.filemanager.database.CloudHandler;
 import com.amaze.filemanager.exceptions.CloudPluginException;
 import com.amaze.filemanager.exceptions.ShellNotRunningException;
 import com.amaze.filemanager.fragments.MainFragment;
-import com.amaze.filemanager.adapters.data.LayoutElementParcelable;
+import com.amaze.filemanager.fragments.preference_fragments.PreferencesConstants;
+
+import com.amaze.filemanager.filesystem.ssh.SFtpClientTemplate;
+import com.amaze.filemanager.filesystem.ssh.SshClientSessionTemplate;
+import com.amaze.filemanager.filesystem.ssh.SshClientTemplate;
+import com.amaze.filemanager.filesystem.ssh.SshClientUtils;
+import com.amaze.filemanager.utils.application.AppConfig;
+
 import com.amaze.filemanager.utils.DataUtils;
 import com.amaze.filemanager.utils.OTGUtil;
 import com.amaze.filemanager.utils.OnFileFound;
@@ -23,6 +31,16 @@ import com.amaze.filemanager.utils.provider.UtilitiesProviderInterface;
 import com.cloudrail.si.interfaces.CloudStorage;
 import com.cloudrail.si.types.SpaceAllocation;
 
+import net.schmizz.sshj.SSHClient;
+import net.schmizz.sshj.common.IOUtils;
+import net.schmizz.sshj.connection.channel.direct.Session;
+import net.schmizz.sshj.sftp.FileMode;
+import net.schmizz.sshj.sftp.RemoteFile;
+import net.schmizz.sshj.sftp.RemoteResourceInfo;
+import net.schmizz.sshj.sftp.SFTPClient;
+import net.schmizz.sshj.sftp.SFTPException;
+import net.schmizz.sshj.xfer.FilePermission;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -31,6 +49,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.MalformedURLException;
 import java.util.ArrayList;
+import java.util.EnumSet;
 
 import jcifs.smb.SmbException;
 import jcifs.smb.SmbFile;
@@ -40,6 +59,8 @@ import jcifs.smb.SmbFile;
  */
 //Hybrid file for handeling all types of files
 public class HybridFile {
+
+    private static final String TAG = "HFile";
 
     String path;
     //public static final int ROOT_MODE=3,LOCAL_MODE=0,SMB_MODE=1,UNKNOWN=-1;
@@ -58,12 +79,16 @@ public class HybridFile {
             if (!isDirectory) this.path = path + name;
             else if (!name.endsWith("/")) this.path = path + name + "/";
             else this.path = path + name;
+        } else if(path.startsWith("ssh://") || isSftp()) {
+            this.path = path + "/" + name;
         } else this.path = path + "/" + name;
     }
 
     public void generateMode(Context context) {
         if (path.startsWith("smb://")) {
             mode = OpenMode.SMB;
+        } else if (path.startsWith("ssh://")) {
+            mode = OpenMode.SFTP;
         } else if (path.startsWith(OTGUtil.PREFIX_OTG)) {
             mode = OpenMode.OTG;
         } else if (isCustomPath()) {
@@ -79,7 +104,7 @@ public class HybridFile {
         } else if(context == null) {
             mode = OpenMode.FILE;
         } else {
-            boolean rootmode = PreferenceManager.getDefaultSharedPreferences(context).getBoolean("rootMode", false);
+            boolean rootmode = PreferenceManager.getDefaultSharedPreferences(context).getBoolean(PreferencesConstants.PREFERENCE_ROOTMODE, false);
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) {
                 mode = OpenMode.FILE;
                 if (rootmode && !getFile().canRead()) {
@@ -124,6 +149,8 @@ public class HybridFile {
         return mode == OpenMode.SMB;
     }
 
+    public boolean isSftp() { return mode == OpenMode.SFTP; }
+
     public boolean isOtgFile() {
         return mode == OpenMode.OTG;
     }
@@ -159,6 +186,14 @@ public class HybridFile {
 
     public long lastModified() throws MalformedURLException, SmbException {
         switch (mode) {
+            case SFTP:
+                SshClientUtils.execute(new SFtpClientTemplate(path) {
+                    @Override
+                    public Long execute(SFTPClient client) throws IOException {
+                        return client.mtime(SshClientUtils.extractRemotePathFrom(path));
+                    }
+                });
+                break;
             case SMB:
                 SmbFile smbFile = getSmbFile();
                 if (smbFile != null)
@@ -182,6 +217,13 @@ public class HybridFile {
     public long length() {
         long s = 0L;
         switch (mode) {
+            case SFTP:
+                return SshClientUtils.execute(new SFtpClientTemplate(path) {
+                    @Override
+                    public Long execute(SFTPClient client) throws IOException {
+                        return client.size(SshClientUtils.extractRemotePathFrom(path));
+                    }
+                });
             case SMB:
                 SmbFile smbFile = getSmbFile();
                 if (smbFile != null)
@@ -210,6 +252,8 @@ public class HybridFile {
 
         long s = 0l;
         switch (mode){
+            case SFTP:
+                return ((HybridFileParcelable)this).getSize();
             case SMB:
                 SmbFile smbFile=getSmbFile();
                 if(smbFile!=null)
@@ -403,6 +447,8 @@ public class HybridFile {
     public boolean isDirectory() {
         boolean isDirectory;
         switch (mode) {
+            case SFTP:
+                return isDirectory(AppConfig.getInstance());
             case SMB:
                 try {
                     isDirectory = new SmbFile(path).isDirectory();
@@ -442,6 +488,18 @@ public class HybridFile {
 
         boolean isDirectory;
         switch (mode) {
+            case SFTP:
+                return SshClientUtils.execute(new SFtpClientTemplate(path) {
+                    @Override
+                    public Boolean execute(SFTPClient client) throws IOException {
+                        try {
+                            return client.stat(SshClientUtils.extractRemotePathFrom(path)).getType()
+                                    .equals(FileMode.Type.DIRECTORY);
+                        } catch (SFTPException notFound){
+                            return false;
+                        }
+                    }
+                });
             case SMB:
                 try {
                     isDirectory = new SmbFile(path).isDirectory();
@@ -499,6 +557,15 @@ public class HybridFile {
         long size = 0L;
 
         switch (mode) {
+            case SFTP:
+                return SshClientUtils.execute(new SFtpClientTemplate(path, false) {
+                    @Override
+                    public Long execute(SFTPClient client) throws IOException {
+                        Long retval = client.size(SshClientUtils.extractRemotePathFrom(path));
+                        client.close();
+                        return retval;
+                    }
+                });
             case SMB:
                 try {
                     size = FileUtils.folderSize(new SmbFile(path));
@@ -531,6 +598,24 @@ public class HybridFile {
         long size = 0l;
 
         switch (mode){
+            case SFTP:
+                return SshClientUtils.execute(new SshClientSessionTemplate(path) {
+                    @Override
+                    public Long execute(Session session) throws IOException {
+                        Session.Command cmd = session.exec(String.format("du -b -s \"%s\"",
+                                SshClientUtils.extractRemotePathFrom(path)));
+
+                        String result = new String(IOUtils.readFully(cmd.getInputStream()).toByteArray());
+                        cmd.close();
+                        if(cmd.getExitStatus() == 0) {
+                            result = result.substring(0, result.indexOf('/') - 1).trim();
+                            return Long.parseLong(result);
+                        }
+                        else {
+                            return 0L;
+                        }
+                    }
+                });
             case SMB:
                 try {
                     size = FileUtils.folderSize(new SmbFile(path));
@@ -592,6 +677,21 @@ public class HybridFile {
                 SpaceAllocation spaceAllocation = dataUtils.getAccount(mode).getAllocation();
                 size = spaceAllocation.getTotal() - spaceAllocation.getUsed();
                 break;
+            case SFTP:
+                return SshClientUtils.execute(new SshClientSessionTemplate(path) {
+                    @Override
+                    public Long execute(final Session session) throws IOException {
+                        Long retval = 0L;
+                        Session.Command cmd = session.exec(String.format("df \"%s\" --output=avail | grep -v Avail", SshClientUtils.extractRemotePathFrom(path)));
+                        String result = IOUtils.readFully(cmd.getInputStream()).toString();
+                        cmd.close();
+
+                        if (cmd.getExitStatus() == 0) {
+                            retval = Long.parseLong(result.trim());
+                        }
+                        return retval;
+                    }
+                });
             case OTG:
                 // TODO: Get free space from OTG when {@link DocumentFile} API adds support
                 break;
@@ -629,6 +729,22 @@ public class HybridFile {
                 SpaceAllocation spaceAllocation = dataUtils.getAccount(mode).getAllocation();
                 size = spaceAllocation.getTotal();
                 break;
+            case SFTP:
+                size = SshClientUtils.execute(new SshClientSessionTemplate(path) {
+                    @Override
+                    public Long execute(Session session) throws IOException {
+                        Long retval = 0L;
+                        Session.Command cmd = session.exec(String.format("df \"%s\" --output=size -B1 | grep -v 1B-blocks", SshClientUtils.extractRemotePathFrom(path)));
+                        String result = IOUtils.readFully(cmd.getInputStream()).toString();
+                        cmd.close();
+
+                        if (cmd.getExitStatus() == 0) {
+                            retval = Long.parseLong(result.trim());
+                        }
+                        return retval;
+                    }
+                });
+                break;
             case OTG:
                 // TODO: Find total storage space of OTG when {@link DocumentFile} API adds support
                 DocumentFile documentFile = OTGUtil.getDocumentFile(path, context, false);
@@ -643,6 +759,32 @@ public class HybridFile {
      */
     public void forEachChildrenFile(Context context, boolean isRoot, OnFileFound onFileFound) {
         switch (mode) {
+            case SFTP:
+                try {
+                    SshClientUtils.execute(new SFtpClientTemplate(path) {
+                        @Override
+                        public Void execute(SFTPClient client) throws IOException {
+                            try {
+                                for (RemoteResourceInfo info : client.ls(SshClientUtils.extractRemotePathFrom(path))) {
+                                    HybridFileParcelable f = new HybridFileParcelable(String.format("%s/%s", path, info.getName()));
+                                    f.setName(info.getName());
+                                    f.setMode(OpenMode.SFTP);
+                                    f.setDirectory(info.isDirectory());
+                                    f.setDate(info.getAttributes().getMtime() * 1000);
+                                    f.setSize(f.isDirectory() ? 0 : info.getAttributes().getSize());
+                                    f.setPermission(Integer.toString(FilePermission.toMask(info.getAttributes().getPermissions()), 8));
+                                    onFileFound.onFileFound(f);
+                                }
+                            } catch (IOException e) {
+                                Log.w("DEBUG.listFiles", "IOException", e);
+                            }
+                            return null;
+                        }
+                    });
+                } catch(Exception e){
+                    e.printStackTrace();
+                }
+                break;
             case SMB:
                 try {
                     SmbFile smbFile = new SmbFile(path);
@@ -685,6 +827,34 @@ public class HybridFile {
     public ArrayList<HybridFileParcelable> listFiles(Context context, boolean isRoot) {
         ArrayList<HybridFileParcelable> arrayList = new ArrayList<>();
         switch (mode) {
+            case SFTP:
+                try {
+                    arrayList = SshClientUtils.execute(new SFtpClientTemplate(path) {
+                        @Override
+                        public ArrayList<HybridFileParcelable> execute(SFTPClient client) throws IOException {
+                            ArrayList<HybridFileParcelable> retval = new ArrayList<HybridFileParcelable>();
+                            try {
+                                for (RemoteResourceInfo info : client.ls(SshClientUtils.extractRemotePathFrom(path))) {
+                                    HybridFileParcelable f = new HybridFileParcelable(String.format("%s/%s", path, info.getName()));
+                                    f.setName(info.getName());
+                                    f.setMode(OpenMode.SFTP);
+                                    f.setDirectory(info.isDirectory());
+                                    f.setDate(info.getAttributes().getMtime() * 1000);
+                                    f.setSize(f.isDirectory() ? 0 : info.getAttributes().getSize());
+                                    f.setPermission(Integer.toString(FilePermission.toMask(info.getAttributes().getPermissions()), 8));
+                                    retval.add(f);
+                                }
+                            } catch (IOException e) {
+                                Log.w("DEBUG.listFiles", "IOException", e);
+                            }
+                            return retval;
+                        }
+                    });
+                } catch(Exception e){
+                    e.printStackTrace();
+                    arrayList.clear();
+                }
+                break;
             case SMB:
                 try {
                     SmbFile smbFile = new SmbFile(path);
@@ -728,9 +898,17 @@ public class HybridFile {
     }
 
     public String getReadablePath(String path) {
+        if (isSftp())
+            return parseSftpPath(path);
         if (isSmb())
             return parseSmbPath(path);
         return path;
+    }
+
+    String parseSftpPath(String a) {
+        if (a.contains("@"))
+            return "ssh://" + a.substring(a.indexOf("@") + 1, a.length());
+        else return a;
     }
 
     String parseSmbPath(String a) {
@@ -746,7 +924,28 @@ public class HybridFile {
      */
     public InputStream getInputStream() {
         InputStream inputStream;
-        if (isSmb()) {
+        if (isSftp()) {
+            return SshClientUtils.execute(new SFtpClientTemplate(path) {
+                @Override
+                public InputStream execute(SFTPClient client) throws IOException {
+                    final RemoteFile rf = client.open(SshClientUtils.extractRemotePathFrom(path));
+                    return rf. new RemoteFileInputStream(){
+                        @Override
+                        public void close() throws IOException {
+                            try
+                            {
+                                super.close();
+                            }
+                            finally
+                            {
+                                rf.close();
+                            }
+                        }
+                    };
+                }
+            });
+        }
+        else if (isSmb()) {
             try {
                 inputStream = new SmbFile(path).getInputStream();
             } catch (IOException e) {
@@ -768,6 +967,28 @@ public class HybridFile {
         InputStream inputStream;
 
         switch (mode) {
+            case SFTP:
+                inputStream = SshClientUtils.execute(new SFtpClientTemplate(path, false) {
+                    @Override
+                    public InputStream execute(final SFTPClient client) throws IOException {
+                        final RemoteFile rf = client.open(SshClientUtils.extractRemotePathFrom(path));
+                        return rf. new RemoteFileInputStream(){
+                            @Override
+                            public void close() throws IOException {
+                                try
+                                {
+                                    super.close();
+                                }
+                                finally
+                                {
+                                    rf.close();
+                                    client.close();
+                                }
+                            }
+                        };
+                    }
+                });
+                break;
             case SMB:
                 try {
                     inputStream = new SmbFile(path).getInputStream();
@@ -819,6 +1040,30 @@ public class HybridFile {
     public OutputStream getOutputStream(Context context) {
         OutputStream outputStream;
         switch (mode) {
+            case SFTP:
+                return SshClientUtils.execute(new SshClientTemplate(path, false) {
+                    @Override
+                    public OutputStream execute(final SSHClient ssh) throws IOException {
+                        final SFTPClient client = ssh.newSFTPClient();
+                        final RemoteFile rf = client.open(SshClientUtils.extractRemotePathFrom(path),
+                                EnumSet.of(net.schmizz.sshj.sftp.OpenMode.WRITE,
+                                        net.schmizz.sshj.sftp.OpenMode.CREAT));
+                        return rf.new RemoteFileOutputStream(){
+                            @Override
+                            public void close() throws IOException {
+                                try
+                                {
+                                    super.close();
+                                }
+                                finally
+                                {
+                                    rf.close();
+                                    client.close();
+                                }
+                            }
+                        };
+                    }
+                });
             case SMB:
                 try {
                     outputStream = new SmbFile(path).getOutputStream();
@@ -852,7 +1097,18 @@ public class HybridFile {
 
     public boolean exists() {
         boolean exists = false;
-        if (isSmb()) {
+        if (isSftp()) {
+            exists = SshClientUtils.execute(new SFtpClientTemplate(path) {
+                @Override
+                public Boolean execute(SFTPClient client) throws IOException {
+                    try {
+                        return client.stat(SshClientUtils.extractRemotePathFrom(path)) != null;
+                    } catch (SFTPException notFound){
+                        return false;
+                    }
+                }
+            });
+        } else if (isSmb()) {
             try {
                 SmbFile smbFile = getSmbFile(2000);
                 exists = smbFile != null && smbFile.exists();
@@ -907,11 +1163,11 @@ public class HybridFile {
         return !isSmb() && !isOtgFile() && !isCustomPath()
                 && !android.util.Patterns.EMAIL_ADDRESS.matcher(path).matches() &&
                 !new File(path).isDirectory() && !isOneDriveFile() && !isGoogleDriveFile()
-                && !isDropBoxFile() && !isBoxFile();
+                && !isDropBoxFile() && !isBoxFile() && !isSftp();
     }
 
-    public boolean setLastModified(long date) {
-        if (isSmb())
+    public boolean setLastModified(final long date) {
+        if (isSmb()) {
             try {
                 new SmbFile(path).setLastModified(date);
                 return true;
@@ -920,13 +1176,26 @@ public class HybridFile {
             } catch (MalformedURLException e) {
                 return false;
             }
+        }
         File f = new File(path);
         return f.setLastModified(date);
 
     }
 
     public void mkdir(Context context) {
-        if (isSmb()) {
+        if(isSftp()) {
+            SshClientUtils.execute(new SFtpClientTemplate(path) {
+                @Override
+                public Void execute(SFTPClient client) throws IOException {
+                    try {
+                        client.mkdir(SshClientUtils.extractRemotePathFrom(path));
+                    } catch(IOException e) {
+                        e.printStackTrace();
+                    }
+                    return null;
+                }
+            });
+        } else if (isSmb()) {
             try {
                 new SmbFile(path).mkdirs();
             } catch (SmbException | MalformedURLException e) {
@@ -976,7 +1245,19 @@ public class HybridFile {
     }
 
     public boolean delete(Context context, boolean rootmode) throws ShellNotRunningException {
-        if (isSmb()) {
+        if (isSftp()) {
+            SshClientUtils.execute(new SFtpClientTemplate(path) {
+                @Override
+                public Void execute(SFTPClient client) throws IOException {
+                    if(isDirectory(AppConfig.getInstance()))
+                        client.rmdir(SshClientUtils.extractRemotePathFrom(path));
+                    else
+                        client.rm(SshClientUtils.extractRemotePathFrom(path));
+                    return null;
+                }
+            });
+            return true;
+        } else if (isSmb()) {
             try {
                 new SmbFile(path).delete();
             } catch (SmbException | MalformedURLException e) {
@@ -1025,12 +1306,12 @@ public class HybridFile {
 
                     layoutElement = new LayoutElementParcelable(path, RootHelper.parseFilePermission(file),
                             "", folderSize() + "", 0, true,
-                            false, file.lastModified() + "", !mainFragment.IS_LIST, mainFragment.SHOW_THUMBS);
+                            false, file.lastModified() + "", mainFragment.SHOW_THUMBS);
                 } else {
                     layoutElement = new LayoutElementParcelable(
                             file.getPath(), RootHelper.parseFilePermission(file),
                             file.getPath(), file.length() + "", file.length(), false,
-                            false, file.lastModified() + "", !mainFragment.IS_LIST, mainFragment.SHOW_THUMBS);
+                            false, file.lastModified() + "", mainFragment.SHOW_THUMBS);
                 }
                 layoutElement.setMode(mode);
                 return layoutElement;

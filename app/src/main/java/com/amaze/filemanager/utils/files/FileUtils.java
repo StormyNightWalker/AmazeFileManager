@@ -51,16 +51,16 @@ import com.amaze.filemanager.activities.DatabaseViewerActivity;
 import com.amaze.filemanager.activities.MainActivity;
 import com.amaze.filemanager.filesystem.HybridFile;
 import com.amaze.filemanager.filesystem.HybridFileParcelable;
-import com.amaze.filemanager.fragments.preference_fragments.PrefFrag;
+import com.amaze.filemanager.fragments.preference_fragments.PreferencesConstants;
 import com.amaze.filemanager.ui.dialogs.GeneralDialogCreation;
 import com.amaze.filemanager.ui.icons.Icons;
 import com.amaze.filemanager.ui.icons.MimeTypes;
+import com.amaze.filemanager.utils.application.AppConfig;
 import com.amaze.filemanager.utils.DataUtils;
 import com.amaze.filemanager.utils.OTGUtil;
 import com.amaze.filemanager.utils.OnFileFound;
 import com.amaze.filemanager.utils.OnProgressUpdate;
 import com.amaze.filemanager.utils.OpenMode;
-import com.amaze.filemanager.utils.application.AppConfig;
 import com.amaze.filemanager.utils.cloud.CloudUtil;
 import com.amaze.filemanager.utils.share.ShareTask;
 import com.amaze.filemanager.utils.theme.AppTheme;
@@ -104,7 +104,10 @@ public class FileUtils {
     }
 
     public static long folderSize(HybridFile directory, OnProgressUpdate<Long> updateState) {
-        return folderSize(new File(directory.getPath()), updateState);
+        if(directory.isSftp())
+            return directory.folderSize(AppConfig.getInstance());
+        else
+            return folderSize(new File(directory.getPath()), updateState);
     }
 
     public static long folderSize(SmbFile directory) {
@@ -442,39 +445,38 @@ public class FileUtils {
     }
 
     private static Uri fileToContentUri(Context context, String path, String volume) {
-        String[] projection = null;
         final String where = MediaStore.MediaColumns.DATA + " = ?";
-        Uri baseUri = MediaStore.Files.getContentUri(volume);
-        boolean isMimeTypeImage = false, isMimeTypeVideo = false, isMimeTypeAudio = false;
-        isMimeTypeImage = Icons.isPicture(new File(path));
-        if (!isMimeTypeImage) {
-            isMimeTypeVideo = Icons.isVideo(new File(path));
-            if (!isMimeTypeVideo) {
-                isMimeTypeAudio = Icons.isVideo(new File(path));
-            }
-        }
-        if (isMimeTypeImage || isMimeTypeVideo || isMimeTypeAudio) {
-            projection = new String[]{BaseColumns._ID};
-            if (isMimeTypeImage) {
+        Uri baseUri;
+        String[] projection;
+        int mimeType = Icons.getTypeOfFile(new File(path));
+
+        switch (mimeType) {
+            case Icons.IMAGE:
                 baseUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
-            } else if (isMimeTypeVideo) {
+                projection = new String[]{BaseColumns._ID};
+                break;
+            case Icons.VIDEO:
                 baseUri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
-            } else if (isMimeTypeAudio) {
+                projection = new String[]{BaseColumns._ID};
+                break;
+            case Icons.AUDIO:
                 baseUri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
-            }
-        } else {
-            projection = new String[]{BaseColumns._ID, MediaStore.Files.FileColumns.MEDIA_TYPE};
+                projection = new String[]{BaseColumns._ID};
+                break;
+            default:
+                baseUri = MediaStore.Files.getContentUri(volume);
+                projection = new String[]{BaseColumns._ID, MediaStore.Files.FileColumns.MEDIA_TYPE};
         }
+
         ContentResolver cr = context.getContentResolver();
         Cursor c = cr.query(baseUri, projection, where, new String[]{path}, null);
         try {
             if (c != null && c.moveToNext()) {
                 boolean isValid = false;
-                if (isMimeTypeImage || isMimeTypeVideo || isMimeTypeAudio) {
+                if (mimeType == Icons.IMAGE || mimeType == Icons.VIDEO || mimeType == Icons.AUDIO) {
                     isValid = true;
                 } else {
-                    int type = c.getInt(c.getColumnIndexOrThrow(
-                            MediaStore.Files.FileColumns.MEDIA_TYPE));
+                    int type = c.getInt(c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE));
                     isValid = type != 0;
                 }
 
@@ -595,6 +597,7 @@ public class FileUtils {
             case GDRIVE:
             case ONEDRIVE:
             case OTG:
+            case SFTP:
                 return true;
             default:
                 return true;// TODO: 29/9/2017 there might be nothing to go back to (check parent)
@@ -653,7 +656,7 @@ public class FileUtils {
     }
 
     public static void openFile(final File f, final MainActivity m, SharedPreferences sharedPrefs) {
-        boolean useNewStack = sharedPrefs.getBoolean(PrefFrag.PREFERENCE_TEXTEDITOR_NEWSTACK, false);
+        boolean useNewStack = sharedPrefs.getBoolean(PreferencesConstants.PREFERENCE_TEXTEDITOR_NEWSTACK, false);
         boolean defaultHandler = isSelfDefault(f, m);
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(m);
         final Toast[] studioCount = {null};
@@ -670,7 +673,7 @@ public class FileUtils {
             Intent intent = new Intent(m, DatabaseViewerActivity.class);
             intent.putExtra("path", f.getPath());
             m.startActivity(intent);
-        }  else if (Icons.isAudio(new File(f.getPath()))) {
+        }  else if (Icons.getTypeOfFile(f) == Icons.AUDIO) {
             final int studio_count = sharedPreferences.getInt("studio", 0);
             Uri uri = Uri.fromFile(f);
             final Intent intent = new Intent();
@@ -726,7 +729,7 @@ public class FileUtils {
      * Support file opening for {@link DocumentFile} (eg. OTG)
      */
     public static void openFile(final DocumentFile f, final MainActivity m, SharedPreferences sharedPrefs) {
-        boolean useNewStack = sharedPrefs.getBoolean(PrefFrag.PREFERENCE_TEXTEDITOR_NEWSTACK, false);
+        boolean useNewStack = sharedPrefs.getBoolean(PreferencesConstants.PREFERENCE_TEXTEDITOR_NEWSTACK, false);
         try {
             openunknown(f, m, false, useNewStack);
         } catch (Exception e) {
@@ -901,9 +904,9 @@ public class FileUtils {
 
     public static boolean isPathAccesible(String dir, SharedPreferences pref) {
         File f = new File(dir);
-        boolean showIfHidden = pref.getBoolean(PrefFrag.PREFERENCE_SHOW_HIDDENFILES, false),
+        boolean showIfHidden = pref.getBoolean(PreferencesConstants.PREFERENCE_SHOW_HIDDENFILES, false),
                 isDirSelfOrParent = dir.endsWith("/.") || dir.endsWith("/.."),
-                showIfRoot = pref.getBoolean(PrefFrag.PREFERENCE_ROOTMODE, false);
+                showIfRoot = pref.getBoolean(PreferencesConstants.PREFERENCE_ROOTMODE, false);
 
         return f.exists() && f.isDirectory()
                 && (!f.isHidden() || (showIfHidden && !isDirSelfOrParent))

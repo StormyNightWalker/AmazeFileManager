@@ -9,8 +9,9 @@ import android.support.v4.app.ActivityCompat;
 import com.afollestad.materialdialogs.DialogAction;
 import com.afollestad.materialdialogs.MaterialDialog;
 import com.amaze.filemanager.R;
+import com.amaze.filemanager.fragments.preference_fragments.PreferencesConstants;
+import com.amaze.filemanager.ui.dialogs.ColorPickerDialog;
 import com.amaze.filemanager.ui.dialogs.GeneralDialogCreation;
-import com.amaze.filemanager.utils.PreferenceUtils;
 import com.amaze.filemanager.utils.color.ColorUsage;
 import com.amaze.filemanager.utils.theme.AppTheme;
 
@@ -27,13 +28,14 @@ public class ThemedActivity extends PreferenceActivity {
         super.onCreate(savedInstanceState);
 
         // checking if theme should be set light/dark or automatic
-        if (getPrefs().getBoolean("random_checkbox", false)) {
+        int colorPickerPref = getPrefs().getInt(PreferencesConstants.PREFERENCE_COLOR_CONFIG, ColorPickerDialog.NO_DATA);
+        if (colorPickerPref == ColorPickerDialog.RANDOM_INDEX) {
             getColorPreference().randomize().saveToPreferences(getPrefs());
         }
 
         setTheme();
 
-        rootMode = getPrefs().getBoolean(PreferenceUtils.KEY_ROOT, false);
+        rootMode = getPrefs().getBoolean(PreferencesConstants.PREFERENCE_ROOTMODE, false);
 
         //requesting storage permissions
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && checkStorage && !checkStoragePermission()) {
@@ -210,6 +212,8 @@ public class ThemedActivity extends PreferenceActivity {
         } else {
             if (theme.equals(AppTheme.LIGHT)) {
                 setTheme(R.style.appCompatLight);
+            } else if (theme.equals(AppTheme.BLACK)) {
+                setTheme(R.style.appCompatBlack);
             } else {
                 setTheme(R.style.appCompatDark);
             }

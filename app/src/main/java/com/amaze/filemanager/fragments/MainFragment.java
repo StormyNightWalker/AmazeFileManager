@@ -43,6 +43,9 @@ import android.preference.PreferenceManager;
 import android.support.design.widget.AppBarLayout;
 import android.support.v4.app.FragmentActivity;
 import android.support.v4.app.FragmentManager;
+import android.support.v4.content.pm.ShortcutInfoCompat;
+import android.support.v4.content.pm.ShortcutManagerCompat;
+import android.support.v4.graphics.drawable.IconCompat;
 import android.support.v4.widget.DrawerLayout;
 import android.support.v4.widget.SwipeRefreshLayout;
 import android.support.v7.view.ActionMode;
@@ -67,6 +70,7 @@ import com.amaze.filemanager.R;
 import com.amaze.filemanager.activities.MainActivity;
 import com.amaze.filemanager.activities.superclasses.ThemedActivity;
 import com.amaze.filemanager.adapters.RecyclerAdapter;
+import com.amaze.filemanager.adapters.data.LayoutElementParcelable;
 import com.amaze.filemanager.asynchronous.asynctasks.DeleteTask;
 import com.amaze.filemanager.asynchronous.asynctasks.LoadFilesListTask;
 import com.amaze.filemanager.asynchronous.handlers.FileHandler;
@@ -79,8 +83,8 @@ import com.amaze.filemanager.filesystem.HybridFile;
 import com.amaze.filemanager.filesystem.HybridFileParcelable;
 import com.amaze.filemanager.filesystem.MediaStoreHack;
 import com.amaze.filemanager.filesystem.PasteHelper;
-import com.amaze.filemanager.fragments.preference_fragments.PrefFrag;
-import com.amaze.filemanager.adapters.data.LayoutElementParcelable;
+import com.amaze.filemanager.filesystem.ssh.SshClientUtils;
+import com.amaze.filemanager.fragments.preference_fragments.PreferencesConstants;
 import com.amaze.filemanager.ui.dialogs.GeneralDialogCreation;
 import com.amaze.filemanager.ui.icons.MimeTypes;
 import com.amaze.filemanager.ui.views.DividerItemDecoration;
@@ -204,13 +208,13 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
         primaryColor = getMainActivity().getColorPreference().getColor(ColorUsage.PRIMARY);
         primaryTwoColor = getMainActivity().getColorPreference().getColor(ColorUsage.PRIMARY_TWO);
 
-        SHOW_PERMISSIONS = sharedPref.getBoolean("showPermissions", false);
-        SHOW_SIZE = sharedPref.getBoolean("showFileSize", true);
-        SHOW_DIVIDERS = sharedPref.getBoolean("showDividers", true);
-        SHOW_HEADERS = sharedPref.getBoolean("showHeaders", true);
-        GO_BACK_ITEM = sharedPref.getBoolean("goBack_checkbox", false);
-        CIRCULAR_IMAGES = sharedPref.getBoolean("circularimages", true);
-        SHOW_LAST_MODIFIED = sharedPref.getBoolean("showLastModified", true);
+        SHOW_PERMISSIONS = sharedPref.getBoolean(PreferencesConstants.PREFERENCE_SHOW_PERMISSIONS, false);
+        SHOW_SIZE = sharedPref.getBoolean(PreferencesConstants.PREFERENCE_SHOW_FILE_SIZE, true);
+        SHOW_DIVIDERS = sharedPref.getBoolean(PreferencesConstants.PREFERENCE_SHOW_DIVIDERS, true);
+        SHOW_HEADERS = sharedPref.getBoolean(PreferencesConstants.PREFERENCE_SHOW_HEADERS, true);
+        GO_BACK_ITEM = sharedPref.getBoolean(PreferencesConstants.PREFERENCE_SHOW_GOBACK_BUTTON, false);
+        CIRCULAR_IMAGES = sharedPref.getBoolean(PreferencesConstants.PREFERENCE_USE_CIRCULAR_IMAGES, true);
+        SHOW_LAST_MODIFIED = sharedPref.getBoolean(PreferencesConstants.PREFERENCE_SHOW_LAST_MODIFIED, true);
     }
 
     public void stopAnimation() {
@@ -250,7 +254,7 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
 
         mSwipeRefreshLayout.setOnRefreshListener(() -> loadlist((CURRENT_PATH), false, openMode));
 
-        SHOW_THUMBS = sharedPref.getBoolean("showThumbs", true);
+        SHOW_THUMBS = sharedPref.getBoolean(PreferencesConstants.PREFERENCE_SHOW_THUMB, true);
         //String itemsstring = res.getString(R.string.items);// TODO: 23/5/2017 use or delete
         mToolbarContainer.setBackgroundColor(MainActivity.currentTab == 1 ? primaryTwoColor : primaryColor);
 
@@ -265,8 +269,8 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
         setHasOptionsMenu(false);
         //getMainActivity() = (MainActivity) getActivity();
         initNoFileLayout();
-        SHOW_HIDDEN = sharedPref.getBoolean("showHidden", false);
-        COLORISE_ICONS = sharedPref.getBoolean("coloriseIcons", true);
+        SHOW_HIDDEN = sharedPref.getBoolean(PreferencesConstants.PREFERENCE_SHOW_HIDDENFILES, false);
+        COLORISE_ICONS = sharedPref.getBoolean(PreferencesConstants.PREFERENCE_COLORIZE_ICONS, true);
         getSortModes();
         this.setRetainInstance(false);
         HybridFile f = new HybridFile(OpenMode.UNKNOWN, CURRENT_PATH);
@@ -280,7 +284,7 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
         }
 
         listView.setHasFixedSize(true);
-        columns = Integer.parseInt(sharedPref.getString("columns", "-1"));
+        columns = Integer.parseInt(sharedPref.getString(PreferencesConstants.PREFERENCE_GRID_COLUMNS, "-1"));
         if (IS_LIST) {
             mLayoutManager = new LinearLayoutManager(getContext());
             listView.setLayoutManager(mLayoutManager);
@@ -517,13 +521,13 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
             textView1.setOnClickListener(null);
             mode.setTitle(positions.size() + "");
             hideOption(R.id.openmulti, menu);
-            if (openMode == OpenMode.SMB) {
+
+            if (openMode != OpenMode.FILE) {
                 hideOption(R.id.addshortcut, menu);
-                hideOption(R.id.openwith, menu);
-                hideOption(R.id.share, menu);
                 hideOption(R.id.compress, menu);
                 return true;
             }
+
             if (getMainActivity().mReturnIntent)
                 if (Build.VERSION.SDK_INT >= 16)
                     showOption(R.id.openmulti, menu);
@@ -563,7 +567,7 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
                         e.printStackTrace();
                     }
                     hideOption(R.id.openwith, menu);
-
+                    hideOption(R.id.addshortcut, menu);
                 }
             } else {
                 if (positions.size() == 1) {
@@ -585,6 +589,7 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
 
                 } else {
                     hideOption(R.id.openparent, menu);
+                    hideOption(R.id.addshortcut, menu);
 
                     if (getMainActivity().mReturnIntent)
                         if (Build.VERSION.SDK_INT >= 16)
@@ -728,7 +733,7 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
                     mode.finish();
                     return true;
                 case R.id.openwith:
-                    boolean useNewStack = sharedPref.getBoolean(PrefFrag.PREFERENCE_TEXTEDITOR_NEWSTACK, false);
+                    boolean useNewStack = sharedPref.getBoolean(PreferencesConstants.PREFERENCE_TEXTEDITOR_NEWSTACK, false);
                     FileUtils.openunknown(new File(checkedItems.get(0).desc), getActivity(), true, useNewStack);
                     return true;
                 case R.id.addshortcut:
@@ -909,6 +914,10 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
                                     ex.printStackTrace();
                                 }
                                 break;
+                            case SFTP:
+                                Toast.makeText(getContext(), getResources().getString(R.string.please_wait), Toast.LENGTH_LONG).show();
+                                SshClientUtils.launchSftp(e.generateBaseFile(), getMainActivity());
+                                break;
                             case OTG:
                                 FileUtils.openFile(OTGUtil.getDocumentFile(e.desc, getContext(), false),
                                         (MainActivity) getActivity(), sharedPref);
@@ -1031,9 +1040,12 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
             loadlist((CURRENT_PATH), false, openMode);
             nofilesview.setRefreshing(false);
         });
-        if (utilsProvider.getAppTheme().equals(AppTheme.LIGHT))
+        if (utilsProvider.getAppTheme().equals(AppTheme.LIGHT)) {
             ((ImageView) nofilesview.findViewById(R.id.image)).setColorFilter(Color.parseColor("#666666"));
-        else {
+        } else if (utilsProvider.getAppTheme().equals(AppTheme.BLACK)) {
+            nofilesview.setBackgroundColor(Utils.getColor(getContext(), android.R.color.black));
+            ((TextView) nofilesview.findViewById(R.id.nofiletext)).setTextColor(Color.WHITE);
+        } else {
             nofilesview.setBackgroundColor(Utils.getColor(getContext(), R.color.holo_dark_background));
             ((TextView) nofilesview.findViewById(R.id.nofiletext)).setTextColor(Color.WHITE);
         }
@@ -1189,7 +1201,7 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
         if (back == null) {
             back = new LayoutElementParcelable("..", "", "",
                     getString(R.string.goback), 0, false, true,
-                    "", !IS_LIST, SHOW_THUMBS);
+                    "", SHOW_THUMBS);
         }
 
         return back;
@@ -1300,6 +1312,11 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
                             e.printStackTrace();
                         }
 
+                    } else if (openMode == OpenMode.SFTP) {
+                        if(!CURRENT_PATH.substring("ssh://".length()).contains("/"))
+                            loadlist(home, false, OpenMode.FILE);
+                        else
+                            loadlist(currentFile.getParent(getContext()), true, openMode);
                     } else if (CURRENT_PATH.equals("/") || CURRENT_PATH.equals(home) ||
                             CURRENT_PATH.equals(OTGUtil.PREFIX_OTG + "/")
                             || CURRENT_PATH.equals(CloudHandler.CLOUD_PREFIX_BOX + "/")
@@ -1421,7 +1438,7 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
             sortby = t - 4;
         }
 
-        dsort = Integer.parseInt(sharedPref.getString("dirontop", "0"));
+        dsort = Integer.parseInt(sharedPref.getString(PreferencesConstants.PREFERENCE_DIRECTORY_SORT_MODE, "0"));
     }
 
     @Override
@@ -1481,7 +1498,7 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
 
                 LayoutElementParcelable layoutElement = new LayoutElementParcelable(name, aMFile.getPath(),
                         "", "", "", 0, false,
-                        aMFile.lastModified() + "", true, !IS_LIST, SHOW_THUMBS);
+                        aMFile.lastModified() + "", true, SHOW_THUMBS);
 
                 layoutElement.setMode(OpenMode.SMB);
                 searchHelper.add(layoutElement.generateBaseFile());
@@ -1492,7 +1509,7 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
                     LayoutElementParcelable layoutElement = new LayoutElementParcelable(name,
                             aMFile.getPath(), "", "", Formatter.formatFileSize(getContext(),
                             aMFile.length()), aMFile.length(), false, aMFile.lastModified() + "",
-                            false, !IS_LIST, SHOW_THUMBS);
+                            false, SHOW_THUMBS);
                     layoutElement.setMode(OpenMode.SMB);
                     searchHelper.add(layoutElement.generateBaseFile());
                     a.add(layoutElement);
@@ -1513,7 +1530,7 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
                 size = "";
                 LayoutElementParcelable layoutElement = new LayoutElementParcelable(f.getPath(), mFile.getPermission(),
                         mFile.getLink(), size, 0, true, false,
-                        mFile.getDate() + "", !IS_LIST, SHOW_THUMBS);
+                        mFile.getDate() + "", SHOW_THUMBS);
 
                 layoutElement.setMode(mFile.getMode());
                 LIST_ELEMENTS.add(layoutElement);
@@ -1535,7 +1552,7 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
                 try {
                     LayoutElementParcelable layoutElement = new LayoutElementParcelable(f.getPath(),
                             mFile.getPermission(), mFile.getLink(), size, longSize, false,
-                            false, mFile.getDate() + "", !IS_LIST, SHOW_THUMBS);
+                            false, mFile.getDate() + "", SHOW_THUMBS);
                     layoutElement.setMode(mFile.getMode());
                     LIST_ELEMENTS.add(layoutElement);
                     file_count++;
@@ -1581,18 +1598,30 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
     private void addShortcut(LayoutElementParcelable path) {
         //Adding shortcut for MainActivity
         //on Home screen
-        Intent shortcutIntent = new Intent(getActivity().getApplicationContext(),
-                MainActivity.class);
+        final Context ctx = getContext();
+
+        if (!ShortcutManagerCompat.isRequestPinShortcutSupported(ctx)) {
+            Toast.makeText(getActivity(),
+                getString(R.string.addshortcut_not_supported_by_launcher),
+                Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Intent shortcutIntent = new Intent(ctx, MainActivity.class);
         shortcutIntent.putExtra("path", path.desc);
         shortcutIntent.setAction(Intent.ACTION_MAIN);
         shortcutIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        Intent addIntent = new Intent();
-        addIntent.putExtra(Intent.EXTRA_SHORTCUT_INTENT, shortcutIntent);
-        addIntent.putExtra(Intent.EXTRA_SHORTCUT_NAME, new File(path.desc).getName());
-        addIntent.putExtra(Intent.EXTRA_SHORTCUT_ICON_RESOURCE,
-                Intent.ShortcutIconResource.fromContext(getActivity(), R.mipmap.ic_launcher));
-        addIntent.setAction("com.android.launcher.action.INSTALL_SHORTCUT");
-        getActivity().sendBroadcast(addIntent);
+
+        // Using file path as shortcut id.
+        ShortcutInfoCompat info = new ShortcutInfoCompat.Builder(ctx, path.desc)
+                .setActivity(getMainActivity().getComponentName())
+                .setIcon(IconCompat.createWithResource(ctx, R.mipmap.ic_launcher))
+                .setIntent(shortcutIntent)
+                .setLongLabel(path.desc)
+                .setShortLabel(new File(path.desc).getName())
+                .build();
+
+        ShortcutManagerCompat.requestPinShortcut(ctx, info, null);
     }
 
     // This method is used to implement the modification for the pre Searching
@@ -1715,7 +1744,7 @@ public class MainFragment extends android.support.v4.app.Fragment implements Bot
 
     @Override
     public int getRootDrawable() {
-        return R.drawable.root;
+        return R.drawable.ic_root_white_24px;
     }
 
 }

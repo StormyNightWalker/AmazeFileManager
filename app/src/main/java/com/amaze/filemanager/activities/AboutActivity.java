@@ -39,6 +39,8 @@ import java.util.Random;
  */
 public class AboutActivity extends BasicActivity implements View.OnClickListener {
 
+    private static final String TAG = "AboutActivity";
+
     private static final int HEADER_HEIGHT = 1024;
     private static final int HEADER_WIDTH = 500;
 
@@ -71,6 +73,8 @@ public class AboutActivity extends BasicActivity implements View.OnClickListener
 
         if (getAppTheme().equals(AppTheme.DARK)) {
             setTheme(R.style.aboutDark);
+        } else if (getAppTheme().equals(AppTheme.BLACK)) {
+            setTheme(R.style.aboutBlack);
         } else {
             setTheme(R.style.aboutLight);
         }
@@ -126,13 +130,13 @@ public class AboutActivity extends BasicActivity implements View.OnClickListener
         // calculating cardview height as per the youtube video thumb aspect ratio
         CoordinatorLayout.LayoutParams layoutParams = (CoordinatorLayout.LayoutParams) mAppBarLayout.getLayoutParams();
         float vidAspectRatio = (float) HEADER_WIDTH / (float) HEADER_HEIGHT;
-        Log.d(getClass().getSimpleName(), vidAspectRatio + "");
+        Log.d(TAG, vidAspectRatio + "");
         int screenWidth = getResources().getDisplayMetrics().widthPixels;
         float reqHeightAsPerAspectRatio = (float) screenWidth *vidAspectRatio;
-        Log.d(getClass().getSimpleName(), reqHeightAsPerAspectRatio + "");
+        Log.d(TAG, reqHeightAsPerAspectRatio + "");
 
 
-        Log.d(getClass().getSimpleName(), "new width: " + screenWidth + " and height: " + reqHeightAsPerAspectRatio);
+        Log.d(TAG, "new width: " + screenWidth + " and height: " + reqHeightAsPerAspectRatio);
 
         layoutParams.width = screenWidth;
         layoutParams.height = (int) reqHeightAsPerAspectRatio;
@@ -153,7 +157,7 @@ public class AboutActivity extends BasicActivity implements View.OnClickListener
      * Method switches icon resources as per current theme
      */
     private void switchIcons() {
-        if (getAppTheme().equals(AppTheme.DARK)) {
+        if (getAppTheme().equals(AppTheme.DARK) || getAppTheme().equals(AppTheme.BLACK)) {
             // dark theme
             mAuthorsDivider.setBackgroundColor(Utils.getColor(this, R.color.divider_dark_card));
         }
